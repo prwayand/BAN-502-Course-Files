@@ -1,0 +1,172 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+# Paul Wayand
+# 01Feb2021
+# Module 2 - Assignment 2
+
+Loading required packages.
+```{r}
+#install.packages("tidyverse")
+#install.packages("tidymodels")
+#install.packages("GGally")
+#install.packages("lmtest")
+#install.packages("ggcorrplot")
+#install.packages("car")
+#install.packages("GGally")
+#install.packages("glmnet")
+#install.packages("lubridate")
+#install.packages("MASS")
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(GGally)
+library(ggcorrplot)
+library(MASS)
+library(car)
+library(lubridate)
+library(lmtest)
+```
+Task 1: Reading in the data
+```{r}
+bike_cleaned <- read_csv("bike_cleaned.csv")
+bike2 = bike_cleaned %>% mutate(dteday = mdy(dteday)) #mdy is a lubridate package function
+bike2 = bike2 %>% mutate_if(is.character, as.factor)
+bike2 = bike2 %>% mutate(hr = as.factor(hr))
+bike2
+```
+Why do we change hr to factor instead of numerial?
+hr is a time of day, it could just as easily been recorded as 1 o'clock. It is not an actual numerical data point. All the values of the time of day should carry the same weight. The difference in the model should come from the beta value for their slope. The beta value should not be multiplied by 9 for 9 o'clock. Tt should have the same weight as 1 o'clock, and to do this, the hr variable had to be converted to factor so as a predictor variable, it could either be a 0 or 1 in the model depending on the time of day. 
+
+Task 2: Which of the quantitative variables appears to be best correlated with “count” 
+
+```{r}
+ggcorr(bike2, label = "TRUE", label_round = 2)
+```
+Temperature and atemp have the highest correlation with count at .4. 
+
+Task 3: Assess the character data with count.
+
+```{r}
+ggplot(bike2,aes(x=hr,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=season,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=mnth,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=holiday,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=weekday,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=workingday,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+ggplot(bike2,aes(x=weathersit,y=count)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+```
+The variables that affect count according to the box plots above are hr, season, mnth, and weathersit. These variables look to affect count because the different levels have different Q1 and Q3 boxes and the median is different. However, in season, the only variable that looks to affect the count is the winter season. Weekday, Workingday, and holiday all have similar Q1-Q3 ranges and medians aroudn the same count for each of their respective levels. 
+
+Task 4: As a baseline, choose the “best” variable from the correlation and visualization analysis above and build a model with that variable as the single predictor of “count”. Comment on the quality of the model.
+
+I am going to choose the temperature variable to produce a model for count.
+
+```{r}
+recipe_bike2 <- recipe(count ~ temp, bike2)
+
+lm_model = #give the model type a name 
+  linear_reg() %>% #specify that we are doing linear regression
+  set_engine("lm") #specify the specify type of linear tool we want to use 
+
+lm_wflow = 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(recipe_bike2)
+
+lm_fit = fit(lm_wflow, bike2)
+
+summary(lm_fit$fit$fit$fit)
+
+```
+
+This model explains 16% of the count variation. This is not a great model, but temp is significant with a p value <<.05. 
+
+Task 5: Ridge Regression excluding the “instant”, “dteday”, “registered”, and “casual” variables in the model. 
+```{r}
+recipe2_bike2 <- recipe(count ~. , bike2) %>% #add all variables via ~.
+  step_rm(instant, dteday, registered, casual)%>%
+  step_dummy(all_nominal()) %>%
+  step_center(all_predictors()) %>% #centers the predictors
+  step_scale(all_predictors()) #scales the predictors
+ 
+ridge_model = #give the model type a name 
+  linear_reg(mixture = 0) %>% #mixture = 0 sets up Ridge Regression
+  set_engine("glmnet") #specify the specify type of linear tool we want to use 
+
+ridge_wflow = 
+  workflow() %>% 
+  add_model(ridge_model) %>% 
+  add_recipe(recipe2_bike2)
+
+ridge_fit = fit(ridge_wflow, bike2)
+
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") 
+```
+I will choose a lambda value of 17. At 17, 62% of the variation in the data for count is accounted for. 
+
+```{r} 
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s = 15570)
+```
+
+Task 6: Lasso regression. 
+```{r}
+recipe3_bike2 <- recipe(count ~. , bike2) %>% #add all variables via ~.
+  step_rm(instant, dteday, registered, casual)%>%
+  step_dummy(all_nominal()) %>%
+  step_center(all_predictors()) %>% #centers the predictors
+  step_scale(all_predictors()) #scales the predictors
+ 
+lasso_model = #give the model type a name 
+  linear_reg(mixture = 1) %>% #mixture = 0 sets up Ridge Regression
+  set_engine("glmnet") #specify the specify type of linear tool we want to use 
+
+lasso_wflow = 
+  workflow() %>% 
+  add_model(lasso_model) %>% 
+  add_recipe(recipe3_bike2)
+
+lasso_fit = fit(lasso_wflow, bike2)
+
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") 
+
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s = 1.017)
+```
+I will choose a lambda of 1.017. with this lambda, the model explains about 62.5 % of the variation in the count data. 
+
+What are the implications of the model results from the ridge and lasso methods?
+The ridge and lasso methods both explain about the same percent of the variation in the data for count in this instance. However, the ridge model keeps all of the predictor levels and variables in the model where the lasso model has reduced some of the levels of the character variables to 0, removing them from the model. 
+
